@@ -5,3 +5,8 @@ venv/
 runs/
 .DS_Store
 Thumbs.db
+
+# PyCharm / IntelliJ
+.idea/
+
+*.pyc
