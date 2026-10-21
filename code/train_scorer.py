@@ -1,120 +1,210 @@
 
-"""E2: Train a logistic-regression scorer on frozen embeddings."""
+"""E6: Train a 1024 -> 64 -> 1 MLP scorer using NumPy."""
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import numpy as np
 
-from common import load_inputs, parse_answer, DATA
+from common import DATA, load_inputs, parse_answer
+
+
+def initialize(rng, hidden):
+    return {
+        "w1": (rng.standard_normal((1024, hidden)) *
+               np.sqrt(2.0 / 1024)).astype(np.float32),
+        "b1": np.zeros(hidden, dtype=np.float32),
+        "w2": (rng.standard_normal((hidden, 1)) *
+               np.sqrt(1.0 / hidden)).astype(np.float32),
+        "b2": np.zeros(1, dtype=np.float32),
+    }
+
+
+def forward(x, p):
+    h = np.maximum(x @ p["w1"] + p["b1"], 0)
+    logits = h @ p["w2"] + p["b2"]
+    return h, logits
+
+
+def loss_value(x, y, p):
+    _, logits = forward(x, p)
+    logits = logits[:, 0]
+    return float(np.mean(np.logaddexp(0, logits) - y * logits))
+
+
+def train_epochs(x, y, p, epochs, batch_size, lr, wd, seed,
+                 x_dev=None, y_dev=None):
+    rng = np.random.default_rng(seed)
+    m = {k: np.zeros_like(v) for k, v in p.items()}
+    v = {k: np.zeros_like(v) for k, v in p.items()}
+    step = 0
+    best_loss = float("inf")
+    best_epoch = 1
+
+    for epoch in range(1, epochs + 1):
+        order = rng.permutation(len(y))
+
+        for start in range(0, len(order), batch_size):
+            idx = order[start:start + batch_size]
+            xb, yb = x[idx], y[idx, None]
+            n = len(idx)
+
+            h, logits = forward(xb, p)
+            prob = 1 / (1 + np.exp(-np.clip(logits, -30, 30)))
+
+            dz = (prob - yb) / n
+            grads = {
+                "w2": h.T @ dz + wd * p["w2"],
+                "b2": dz.sum(axis=0),
+            }
+
+            dh = (dz @ p["w2"].T) * (h > 0)
+            grads["w1"] = xb.T @ dh + wd * p["w1"]
+            grads["b1"] = dh.sum(axis=0)
+
+            step += 1
+            for key in p:
+                g = grads[key]
+                m[key] = 0.9 * m[key] + 0.1 * g
+                v[key] = 0.999 * v[key] + 0.001 * (g * g)
+
+                mhat = m[key] / (1 - 0.9 ** step)
+                vhat = v[key] / (1 - 0.999 ** step)
+
+                p[key] -= lr * mhat / (np.sqrt(vhat) + 1e-8)
+
+        if x_dev is not None:
+            dev_loss = loss_value(x_dev, y_dev, p)
+            if dev_loss < best_loss:
+                best_loss = dev_loss
+                best_epoch = epoch
+            print(
+                f"Epoch {epoch:2d} | "
+                f"train loss {loss_value(x, y, p):.5f} | "
+                f"dev loss {dev_loss:.5f}",
+                flush=True
+            )
+        else:
+            print(
+                f"Final training epoch {epoch}/{epochs}",
+                flush=True
+            )
+
+    return best_epoch
 
 
 def main():
+    timer = time.perf_counter()
+
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--output", type=Path,
-        default=Path("runs/e2-scorer.npz")
-    )
-    parser.add_argument("--epochs", type=int, default=400)
-    parser.add_argument("--lr", type=float, default=0.05)
-    parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument("--output", type=Path,
+                        default=Path("runs/e6-mlp.npz"))
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--hidden", type=int, default=64)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--weight-decay", type=float, default=0.001)
+    parser.add_argument("--seed", type=int, default=17)
     args = parser.parse_args()
 
-    # Official loader: shape (N, 4, 1024)
     bank, arrays = load_inputs("train")
-    x = arrays["embeddings"].astype(np.float32)
+    embeddings = arrays["embeddings"].astype(np.float32)
 
     with open(DATA / "gsm8k_train.jsonl", encoding="utf-8") as f:
-        references = [json.loads(line) for line in f if line.strip()]
+        refs = [json.loads(line) for line in f if line.strip()]
 
-    if len(bank) != len(references):
-        raise ValueError("Train reference count mismatch")
+    if len(bank) != len(refs):
+        raise ValueError("Reference count mismatch")
 
     labels = []
-    for row, ref in zip(bank, references):
+    for row, ref in zip(bank, refs):
         if row["id"] != ref["id"] or row["question"] != ref["question"]:
-            raise ValueError("Train reference alignment mismatch")
+            raise ValueError("Reference alignment mismatch")
 
         gold = parse_answer(ref["answer"])
         if gold is None:
-            raise ValueError("Could not parse a train reference answer")
+            raise ValueError("Unparseable reference")
 
-        labels.extend([
-            int(parse_answer(c["text"]) == gold)
+        labels.append([
+            float(parse_answer(c["text"]) == gold)
             for c in row["candidates"]
         ])
 
-    y = np.asarray(labels, dtype=np.float32)
-    x = x.reshape(-1, 1024)
+    labels = np.asarray(labels, dtype=np.float32)
+    num_questions = len(bank)
 
-    # Standardize using TRAIN statistics only.
-    mean = x.mean(axis=0)
-    std = x.std(axis=0)
-    std = np.maximum(std, 1e-6)
-    x = (x - mean) / std
+    # Split by QUESTION to avoid candidate leakage.
+    rng = np.random.default_rng(args.seed)
+    order = rng.permutation(num_questions)
+    n_dev = max(1, int(num_questions * 0.1))
 
-    # Logistic regression, trained with Adam in NumPy.
-    rng = np.random.default_rng(17)
-    w = np.zeros(1024, dtype=np.float32)
-    b = np.float32(0.0)
+    dev_ids = order[:n_dev]
+    train_ids = order[n_dev:]
 
-    mw = np.zeros_like(w)
-    vw = np.zeros_like(w)
-    mb = np.float32(0.0)
-    vb = np.float32(0.0)
+    def flatten(ids):
+        xx = embeddings[ids].reshape(-1, 1024)
+        yy = labels[ids].reshape(-1)
+        return xx, yy
 
-    beta1, beta2 = 0.9, 0.999
-    eps = 1e-8
-    n = len(y)
+    x_train, y_train = flatten(train_ids)
+    x_dev, y_dev = flatten(dev_ids)
 
-    print(f"Train questions: {len(bank)}")
-    print(f"Train candidates: {n}")
-    print(f"Positive labels: {int(y.sum())}")
-    print(f"Positive fraction: {float(y.mean()):.4f}")
+    # Statistics computed from internal training portion only.
+    mean = x_train.mean(axis=0)
+    std = np.maximum(x_train.std(axis=0), 1e-6)
 
-    for step in range(1, args.epochs + 1):
-        logits = np.clip(x @ w + b, -30, 30)
-        probs = 1.0 / (1.0 + np.exp(-logits))
+    x_train = (x_train - mean) / std
+    x_dev = (x_dev - mean) / std
 
-        error = probs - y
-        dw = (x.T @ error) / n + args.weight_decay * w
-        db = np.float32(error.mean())
+    print(f"Train questions: {len(train_ids)}")
+    print(f"Internal dev questions: {len(dev_ids)}")
+    print(f"Hidden dimension: {args.hidden}")
 
-        mw = beta1 * mw + (1 - beta1) * dw
-        vw = beta2 * vw + (1 - beta2) * (dw * dw)
-        mb = beta1 * mb + (1 - beta1) * db
-        vb = beta2 * vb + (1 - beta2) * (db * db)
+    print("\nPhase 1: choose epoch using internal dev")
+    p = initialize(np.random.default_rng(args.seed), args.hidden)
 
-        mw_hat = mw / (1 - beta1 ** step)
-        vw_hat = vw / (1 - beta2 ** step)
-        mb_hat = mb / (1 - beta1 ** step)
-        vb_hat = vb / (1 - beta2 ** step)
+    best_epoch = train_epochs(
+        x_train, y_train, p,
+        args.epochs, args.batch_size, args.lr,
+        args.weight_decay, args.seed,
+        x_dev, y_dev
+    )
 
-        w -= args.lr * mw_hat / (np.sqrt(vw_hat) + eps)
-        b -= args.lr * mb_hat / (np.sqrt(vb_hat) + eps)
+    print(f"\nBest epoch: {best_epoch}")
 
-        if step == 1 or step % 50 == 0 or step == args.epochs:
-            logits = x @ w + b
-            loss = float(
-                np.logaddexp(0, logits).mean()
-                - (y * logits).mean()
-                + 0.5 * args.weight_decay * (w @ w)
-            )
-            print(f"Step {step:4d} | train loss {loss:.5f}")
+    # Retrain on the full official TRAIN split.
+    x_full = embeddings.reshape(-1, 1024)
+    y_full = labels.reshape(-1)
+    full_mean = x_full.mean(axis=0)
+    full_std = np.maximum(x_full.std(axis=0), 1e-6)
+    x_full = (x_full - full_mean) / full_std
+
+    print("\nPhase 2: retrain on full TRAIN")
+    p_final = initialize(
+        np.random.default_rng(args.seed), args.hidden
+    )
+
+    train_epochs(
+        x_full, y_full, p_final,
+        best_epoch, args.batch_size, args.lr,
+        args.weight_decay, args.seed
+    )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     np.savez(
         args.output,
-        weight=w,
-        bias=np.asarray(b, dtype=np.float32),
-        mean=mean.astype(np.float32),
-        std=std.astype(np.float32),
+        **p_final,
+        mean=full_mean.astype(np.float32),
+        std=full_std.astype(np.float32),
     )
 
-    print(f"Checkpoint saved: {args.output}")
+    elapsed = time.perf_counter() - timer
+    print(f"\nCheckpoint: {args.output}")
     print(f"Checkpoint size: {args.output.stat().st_size:,} bytes")
+    print(f"Training pipeline seconds: {elapsed:.3f}")
 
 
 if __name__ == "__main__":
