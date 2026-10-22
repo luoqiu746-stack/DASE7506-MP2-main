@@ -1,5 +1,5 @@
 
-"""MP2 E6-D: MLP Scorer + Voting Fusion."""
+"""MP2 E8: Confidence-Aware Adaptive Voting Fusion."""
 
 from collections import Counter
 
@@ -8,13 +8,11 @@ import numpy as np
 from common import parse_answer
 
 
-VOTE_WEIGHT = 0.5
-
-
 def predict(bank, arrays, checkpoint):
     if checkpoint is None:
-        raise ValueError("E6-D requires --checkpoint")
+        raise ValueError("E8 requires --checkpoint")
 
+    # Reuse the trained E6-C MLP.
     with np.load(checkpoint, allow_pickle=False) as model:
         w1 = model["w1"]
         b1 = model["b1"]
@@ -23,9 +21,8 @@ def predict(bank, arrays, checkpoint):
         mean = model["mean"]
         std = model["std"]
 
-    x = arrays["embeddings"].astype(np.float32)
     n = len(bank)
-
+    x = arrays["embeddings"].astype(np.float32)
     x = x.reshape(-1, 1024)
     x = (x - mean) / std
 
@@ -35,6 +32,18 @@ def predict(bank, arrays, checkpoint):
     choices = []
 
     for row, scores in zip(bank, mlp_scores):
+
+        # 1. Calculate the gap between top two MLP scores.
+        sorted_scores = np.sort(scores)
+        gap = max(
+            0.0,
+            float(sorted_scores[-1] - sorted_scores[-2])
+        )
+
+        # 2. Adaptive voting weight.
+        vote_weight = 1.0 / (1.0 + gap)
+
+        # 3. Parse the four final answers.
         answers = [
             parse_answer(candidate["text"])
             for candidate in row["candidates"]
@@ -50,7 +59,8 @@ def predict(bank, arrays, checkpoint):
             for answer in answers
         ], dtype=np.float32)
 
-        final_scores = scores + VOTE_WEIGHT * vote_scores
+        # 4. Fuse MLP scores with adaptive voting.
+        final_scores = scores + vote_weight * vote_scores
 
         choices.append(int(np.argmax(final_scores)))
 
