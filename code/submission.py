@@ -1,92 +1,75 @@
 
-"""MP2 E12: BCE + Pairwise MLP ensemble with voting."""
+"""MP2 E13: Group-aware candidate scorer."""
 
 from collections import Counter
 
 import numpy as np
-
 from common import parse_answer
 
-
-BCE_WEIGHT = 0.5
-PAIR_WEIGHT = 0.5
-VOTE_WEIGHT = 0.5
 
 EPS = 1e-6
 
 
-def mlp_scores(x, model, prefix):
-    """Compute four candidate scores per question."""
+def make_features(bank, embeddings):
+    e = embeddings.astype(np.float32)
+    n = len(bank)
 
-    w1 = model[f"{prefix}_w1"]
-    b1 = model[f"{prefix}_b1"]
-    w2 = model[f"{prefix}_w2"]
-    b2 = model[f"{prefix}_b2"]
-    mean = model[f"{prefix}_mean"]
-    std = model[f"{prefix}_std"]
+    group_mean = e.mean(axis=1, keepdims=True)
+    relative = e - group_mean
 
-    n = x.shape[0]
+    norm = e / np.maximum(
+        np.linalg.norm(e, axis=2, keepdims=True), EPS
+    )
+    similarity = norm @ norm.transpose(0, 2, 1)
 
-    flat = x.reshape(-1, 1024)
-    flat = (flat - mean) / std
+    mean_similarity = (
+        similarity.sum(axis=2)
+        - np.diagonal(similarity, axis1=1, axis2=2)
+    ) / 3.0
 
-    hidden = np.maximum(flat @ w1 + b1, 0)
-    scores = hidden @ w2 + b2
+    votes = np.zeros((n, 4), dtype=np.float32)
 
-    return scores.reshape(n, 4)
+    for i, row in enumerate(bank):
+        answers = [
+            parse_answer(c["text"]) for c in row["candidates"]
+        ]
+        counts = Counter(a for a in answers if a is not None)
 
+        for j, answer in enumerate(answers):
+            votes[i, j] = (
+                counts[answer] / 4.0 if answer is not None else 0.0
+            )
 
-def normalize_scores(scores):
-    """Standardize scores within each question."""
-
-    mean = scores.mean(axis=1, keepdims=True)
-    std = scores.std(axis=1, keepdims=True)
-
-    return (scores - mean) / np.maximum(std, EPS)
+    return np.concatenate(
+        [
+            e,
+            relative,
+            votes[..., None],
+            mean_similarity[..., None],
+        ],
+        axis=2,
+    ).astype(np.float32)
 
 
 def predict(bank, arrays, checkpoint):
     if checkpoint is None:
-        raise ValueError("E12 requires --checkpoint")
+        raise ValueError("E13 requires --checkpoint")
 
-    x = arrays["embeddings"].astype(np.float32)
+    x = make_features(bank, arrays["embeddings"])
+    n = len(bank)
 
     with np.load(checkpoint, allow_pickle=False) as model:
-        bce_scores = mlp_scores(x, model, "bce")
-        pair_scores = mlp_scores(x, model, "pair")
+        mean = model["mean"]
+        std = model["std"]
+        w1 = model["w1"]
+        b1 = model["b1"]
+        w2 = model["w2"]
+        b2 = model["b2"]
 
-    # Normalize each model's scores within each question.
-    bce_norm = normalize_scores(bce_scores)
-    pair_norm = normalize_scores(pair_scores)
+    flat = x.reshape(-1, 2050)
+    flat = (flat - mean) / std
 
-    choices = []
+    hidden = np.maximum(flat @ w1 + b1, 0)
+    scores = (hidden @ w2 + b2).reshape(n, 4)
 
-    for i, row in enumerate(bank):
-        answers = [
-            parse_answer(candidate["text"])
-            for candidate in row["candidates"]
-        ]
-
-        counts = Counter(
-            answer for answer in answers
-            if answer is not None
-        )
-
-        vote_scores = np.asarray(
-            [
-                counts[answer] / 4.0
-                if answer is not None else 0.0
-                for answer in answers
-            ],
-            dtype=np.float32
-        )
-
-        combined_scores = (
-            BCE_WEIGHT * bce_norm[i]
-            + PAIR_WEIGHT * pair_norm[i]
-            + VOTE_WEIGHT * vote_scores
-        )
-
-        choices.append(int(np.argmax(combined_scores)))
-
-    return choices
+    return [int(i) for i in np.argmax(scores, axis=1)]
