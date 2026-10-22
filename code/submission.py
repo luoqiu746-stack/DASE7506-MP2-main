@@ -1,5 +1,5 @@
 
-"""MP2 E11: Pairwise Ranking Scorer + Majority Voting."""
+"""MP2 E12: BCE + Pairwise MLP ensemble with voting."""
 
 from collections import Counter
 
@@ -8,51 +8,71 @@ import numpy as np
 from common import parse_answer
 
 
+BCE_WEIGHT = 0.5
+PAIR_WEIGHT = 0.5
 VOTE_WEIGHT = 0.5
+
+EPS = 1e-6
+
+
+def mlp_scores(x, model, prefix):
+    """Compute four candidate scores per question."""
+
+    w1 = model[f"{prefix}_w1"]
+    b1 = model[f"{prefix}_b1"]
+    w2 = model[f"{prefix}_w2"]
+    b2 = model[f"{prefix}_b2"]
+    mean = model[f"{prefix}_mean"]
+    std = model[f"{prefix}_std"]
+
+    n = x.shape[0]
+
+    flat = x.reshape(-1, 1024)
+    flat = (flat - mean) / std
+
+    hidden = np.maximum(flat @ w1 + b1, 0)
+    scores = hidden @ w2 + b2
+
+    return scores.reshape(n, 4)
+
+
+def normalize_scores(scores):
+    """Standardize scores within each question."""
+
+    mean = scores.mean(axis=1, keepdims=True)
+    std = scores.std(axis=1, keepdims=True)
+
+    return (scores - mean) / np.maximum(std, EPS)
 
 
 def predict(bank, arrays, checkpoint):
     if checkpoint is None:
-        raise ValueError("E11 requires --checkpoint")
+        raise ValueError("E12 requires --checkpoint")
 
-    # Load the E10 pairwise-ranking MLP checkpoint.
-    with np.load(checkpoint, allow_pickle=False) as model:
-        w1 = model["w1"]
-        b1 = model["b1"]
-        w2 = model["w2"]
-        b2 = model["b2"]
-        mean = model["mean"]
-        std = model["std"]
-
-    n = len(bank)
-
-    # Calculate scorer scores for all candidates.
     x = arrays["embeddings"].astype(np.float32)
-    x = x.reshape(-1, 1024)
-    x = (x - mean) / std
 
-    hidden = np.maximum(x @ w1 + b1, 0)
-    scorer_scores = (hidden @ w2 + b2).reshape(n, 4)
+    with np.load(checkpoint, allow_pickle=False) as model:
+        bce_scores = mlp_scores(x, model, "bce")
+        pair_scores = mlp_scores(x, model, "pair")
+
+    # Normalize each model's scores within each question.
+    bce_norm = normalize_scores(bce_scores)
+    pair_norm = normalize_scores(pair_scores)
 
     choices = []
 
-    for row, scores in zip(bank, scorer_scores):
-
-        # Parse the final answer of each candidate.
+    for i, row in enumerate(bank):
         answers = [
             parse_answer(candidate["text"])
             for candidate in row["candidates"]
         ]
 
-        # Count votes for each valid final answer.
         counts = Counter(
             answer for answer in answers
             if answer is not None
         )
 
-        # Same vote definition as E6-D:
-        # frequency of each answer divided by four.
-        vote_scores = np.array(
+        vote_scores = np.asarray(
             [
                 counts[answer] / 4.0
                 if answer is not None else 0.0
@@ -61,12 +81,12 @@ def predict(bank, arrays, checkpoint):
             dtype=np.float32
         )
 
-        # Combine pairwise scorer scores and voting scores.
-        final_scores = (
-            scores + VOTE_WEIGHT * vote_scores
+        combined_scores = (
+            BCE_WEIGHT * bce_norm[i]
+            + PAIR_WEIGHT * pair_norm[i]
+            + VOTE_WEIGHT * vote_scores
         )
 
-        selected = int(np.argmax(final_scores))
-        choices.append(selected)
+        choices.append(int(np.argmax(combined_scores)))
 
     return choices
