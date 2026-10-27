@@ -27,6 +27,7 @@ PREDICTION_FILES = {
     "E19-B": "runs/e19-validation-predictions.json",
     "E21": "runs/e21-validation-predictions.json",
     "E22": "runs/e22-validation-predictions.json",
+    "E24": "runs/e24-validation-predictions.json",
 }
 
 OUTPUT = Path("runs/e22-hard-validation-analysis.json")
