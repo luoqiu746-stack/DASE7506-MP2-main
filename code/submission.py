@@ -1,10 +1,11 @@
 
-"""E17-C: Hard-case weighted ranking MLP + Voting.
+"""E19-B: Answer-level probability aggregation.
 
-Uses the E17-B checkpoint without additional training.
+Uses E14-B weighted BCE MLP and a temperature
+selected using official TRAIN internal-dev data.
 """
 
-from collections import Counter
+from collections import defaultdict
 
 import numpy as np
 
@@ -13,12 +14,11 @@ from common import parse_answer
 
 INPUT_DIM = 1024
 CANDIDATES = 4
-VOTE_WEIGHT = 0.5
 
 
 def predict(bank, arrays, checkpoint):
     if checkpoint is None:
-        raise ValueError("E17-C requires a checkpoint")
+        raise ValueError("E19 requires a checkpoint")
 
     embeddings = arrays["embeddings"].astype(np.float32)
     n = len(bank)
@@ -35,13 +35,13 @@ def predict(bank, arrays, checkpoint):
         b1 = model["b1"]
         w2 = model["w2"]
         b2 = model["b2"]
+        temperature = float(model["temperature"][0])
 
     flat = embeddings.reshape(-1, INPUT_DIM)
     flat = (flat - mean) / std
 
     hidden = np.maximum(
-        flat @ w1 + b1,
-        0.0
+        flat @ w1 + b1, 0.0
     )
 
     scores = (
@@ -56,24 +56,37 @@ def predict(bank, arrays, checkpoint):
             for candidate in row["candidates"]
         ]
 
-        counts = Counter(
-            answer for answer in answers
-            if answer is not None
+        logits = scores[i]
+
+        z = logits.astype(np.float64) / temperature
+        z -= z.max()
+
+        probabilities = np.exp(z)
+        probabilities /= probabilities.sum()
+
+        groups = defaultdict(list)
+
+        for j, answer in enumerate(answers):
+            if answer is None:
+                key = ("unparsed", j)
+            else:
+                key = ("answer", answer)
+
+            groups[key].append(j)
+
+        best_group = max(
+            groups.values(),
+            key=lambda indices: (
+                sum(probabilities[j] for j in indices),
+                max(float(logits[j]) for j in indices),
+            ),
         )
 
-        vote_scores = np.asarray(
-            [
-                counts[answer] / 4.0
-                if answer is not None else 0.0
-                for answer in answers
-            ],
-            dtype=np.float32
+        chosen = max(
+            best_group,
+            key=lambda j: float(logits[j]),
         )
 
-        combined_scores = (
-            scores[i] + VOTE_WEIGHT * vote_scores
-        )
-
-        choices.append(int(np.argmax(combined_scores)))
+        choices.append(int(chosen))
 
     return choices
