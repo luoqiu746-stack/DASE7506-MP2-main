@@ -1,0 +1,12 @@
+{
+  "submission.py": "84214abd1250ba789918ea8ee173b9e99f1bff1800a7dab04d70f464ededba10",
+  "train_scorer.py": "018110c2c9d1d1e83d488a8801cee81ff34c2acbf41c2c0329efc4fa00a73c61",
+  "train_e25.py": "541494736a150c66c5dbdce26778a6bfbd1a1d5c82ee0a859192b92959e53027",
+  "train_e14.py": "d016af988667b88a85c001d9a50165652bcb0cd4449562a86fc5e33b903e8a6d",
+  "compare_final_models.py": "ba547528bd23d461eb10f8b77cf5590ba1f93863429d8376dc4c806f3be1f4ca",
+  "analyze_e22.py": "9e2fabc5ac2b9a22b073a8e2f51d49f1f71ea21eeab557c973b12369fe83b909",
+  "requirements.txt": "6924d9c1bd48045b9a1f2fefabf7f08b33da2818a366f9c183991f160ebcb18a",
+  "common.py": "aecd10f7ff2e9e82ac5673d34d576e122caac51d2caaa7c7a8aa05906da51f6c",
+  "predict.py": "e7a627fbdc9ef8d4ab3189a6fa5ac02d56ae703ccd1a81507aea0bd66e042162",
+  "score_predictions.py": "fe12b809b82117aea722e5dfef7a55a88950a7cf50c49ec2ea007ea847959960"
+}

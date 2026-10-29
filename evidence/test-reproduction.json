@@ -1,0 +1,19 @@
+{
+  "score": {
+    "protocol": "dase7506-mp2-open-hard-verifier-v5",
+    "split": "test",
+    "correct": 393,
+    "n": 467,
+    "accuracy": 84.1541755888651,
+    "scoring_seconds": 0.010217750037554651
+  },
+  "timing": {
+    "prediction_process_wall_seconds": 1.7645867919782177,
+    "scoring_process_wall_seconds": 0.057746791979297996,
+    "total_process_wall_seconds": 1.8223335839575157
+  },
+  "predictions_identical_to_frozen": true,
+  "source_assets_unchanged": true,
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "threads": 4
+}

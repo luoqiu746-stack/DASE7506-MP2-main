@@ -1,0 +1,15 @@
+{
+  "pages": 8,
+  "all_pages_visually_reviewed": true,
+  "table_numbering": "1-8",
+  "title_border_removed": true,
+  "commands_font": "Liberation Mono",
+  "official_score_verified": true,
+  "source_asset_hashes_verified": true,
+  "author_omitted": false,
+  "model_code_commit": "7d633199073d36020b0298440fa7d753c846f05e",
+  "test_predictions_identical": true,
+  "author": "Luo Xinqiu",
+  "student_id": "3036707989",
+  "signature_revision_date": "2026-10-29"
+}

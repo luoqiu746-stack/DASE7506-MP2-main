@@ -1,0 +1,57 @@
+{
+  "assets": {
+    "mlp3-0.npz": {
+      "bytes": 140968,
+      "sha256": "fc16ae17a047ce462ad63ddcef50e003d9c236c661fc414a46594ede07c01497"
+    },
+    "mlp3-1.npz": {
+      "bytes": 140968,
+      "sha256": "5af12be1726eabe03477e657933e9eca8c7ab44d2bc9312a2245c3ca303584d2"
+    },
+    "process-meta-800.cbm": {
+      "bytes": 493544,
+      "sha256": "88771fabefc6a25599ddad7e3e873370051655ab3a27ddb6810c594efe77920b"
+    },
+    "bce5-s17-800.cbm": {
+      "bytes": 506200,
+      "sha256": "eb9396ae345c5a97a9c8aebe3ea45d5bfc3ce8827d0dad22e4ae8a2fdab41ce6"
+    },
+    "mlp3-2.npz": {
+      "bytes": 140968,
+      "sha256": "db50253718ec1a92996c33a15d6c460aa4eeb3bb6e9d51f99512200c924c5e60"
+    },
+    "config.json": {
+      "bytes": 1342,
+      "sha256": "2dba793c88ec0b25f761c3a9b411392814390378b740310d2e32e760c83d4da0"
+    },
+    "rbf-p128-g0.25-hard-C0.1.npz": {
+      "bytes": 1587950,
+      "sha256": "01487659a86c22e7c9f27cbae3cafbfee2f8c3d7461853b075a6de59f694abc4"
+    },
+    "repair-full-800.cbm": {
+      "bytes": 524752,
+      "sha256": "7d5c0d2cff2b8eda6a6010b3c8a27a8c0fde35f8af1491f1b0267e556e08773e"
+    },
+    "full-d5-800.cbm": {
+      "bytes": 517040,
+      "sha256": "69e92ccb8cec178217703457d76a419694aba0a608d746d67fcc3ed12ccd503f"
+    }
+  },
+  "raw_asset_bytes": 4053732,
+  "uncompressed_asset_bytes": 4050842,
+  "conservative_json_npy_bytes": 11666720,
+  "preserved_files": 57,
+  "previous_files_hashes_unchanged": true,
+  "source_and_assets_match_freeze": true,
+  "cv_fits": 18,
+  "full_train_fits": 4,
+  "cv_recipes": 57,
+  "excel_rows": 255,
+  "training_pipeline_seconds": 151.01264566695318,
+  "diagnostic_seconds": 1.643338333000429,
+  "validation_paired": {
+    "gained": 3,
+    "lost": 2,
+    "both_wrong": 47
+  }
+}
